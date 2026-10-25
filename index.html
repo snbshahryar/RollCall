@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roll Call</title>
+<style>
+  :root {
+    --paper: #f3f6f4;
+    --ink: #14302b;
+    --muted: #5d716c;
+    --line: #c9d6d1;
+    --card: #ffffff;
+    --accent: #1f6f5c;
+    --accent-ink: #ffffff;
+    --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0f1d1a;
+      --ink: #e6f0ed;
+      --muted: #93a8a2;
+      --line: #284039;
+      --card: #162824;
+      --accent: #5fc4a8;
+      --accent-ink: #0b1f1a;
+      --error: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  main {
+    width: 100%; max-width: 420px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px 24px;
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+  p.sub { margin: 0 0 22px; color: var(--muted); }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; }
+  input {
+    width: 100%; font: inherit; color: inherit;
+    background: transparent;
+    border: 1.5px solid var(--line);
+    border-radius: 8px; padding: 12px;
+  }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  button {
+    width: 100%; margin-top: 22px; font: inherit; font-weight: 700;
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: 8px; padding: 14px; cursor: pointer;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  .error { color: var(--error); margin-top: 14px; min-height: 1.2em; }
+  .code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 2.6rem; font-weight: 700; letter-spacing: .12em;
+    text-align: center; color: var(--accent);
+    border: 2px dashed var(--accent); border-radius: 10px;
+    padding: 18px 8px; margin: 18px 0 14px;
+  }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <section id="formView">
+    <h1>حضور غیاب ورودی 404</h1>
+    <p class="sub">اطلاعات خود را وارد کرده و روی "حاضر هستم" کلیک کنید</p>
+    <form id="form" autocomplete="off" novalidate>
+      <label for="sid">شماره دانشجویی</label>
+      <input id="sid" name="sid" inputmode="text" required>
+      <label for="sname">نام و نام خانوادگی</label>
+      <input id="sname" name="sname" required>
+      <button id="btn" type="submit">حاضر هستم</button>
+      <div class="error" id="err" role="alert"></div>
+    </form>
+  </section>
+
+  <section id="doneView" class="hidden" aria-live="polite">
+    <h1>You are marked present</h1>
+    <p class="sub" id="doneName"></p>
+    <div class="code" id="code"></div>
+    <p class="sub">Your confirmation code. Show it to your teacher if asked.</p>
+  </section>
+</main>
+
+<script>
+  // 1) Paste your Google Apps Script Web App URL here (ends with /exec)
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw8qtTRalJHxLSYqM-UHjM1CwoGwKLF03URnoZe6j2Ri50NASNd8tBw9xsM1vFjej14/exec";
+
+  const form = document.getElementById("form");
+  const btn = document.getElementById("btn");
+  const err = document.getElementById("err");
+
+  function makeCode() {
+    // No look-alike characters (0/O, 1/I)
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let c = "";
+    const a = new Uint32Array(6);
+    crypto.getRandomValues(a);
+    for (const n of a) c += chars[n % chars.length];
+    return c;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    const id = form.sid.value.trim();
+    const name = form.sname.value.trim();
+    if (!id || !name) { err.textContent = "Enter both your Student ID and your name."; return; }
+    if (SCRIPT_URL.startsWith("PASTE")) { err.textContent = "The page is not connected to the Google Sheet yet."; return; }
+
+    // Stop double submissions from the same phone
+    if (localStorage.getItem("rollcall_" + new Date().toDateString()) === id) {
+      err.textContent = "This ID was already submitted today from this device.";
+      return;
+    }
+
+    const code = makeCode();
+    btn.disabled = true; btn.textContent = "Sending…";
+    try {
+      // text/plain avoids a CORS preflight, which Apps Script does not support
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ id, name, code })
+      });
+      try { localStorage.setItem("rollcall_" + new Date().toDateString(), id); } catch (_) {}
+      document.getElementById("doneName").textContent = name + " (" + id + ")";
+      document.getElementById("code").textContent = code;
+      document.getElementById("formView").classList.add("hidden");
+      document.getElementById("doneView").classList.remove("hidden");
+    } catch (ex) {
+      err.textContent = "Could not send. Check your connection and try again.";
+      btn.disabled = false; btn.textContent = "Confirm attendance";
+    }
+  });
+</script>
+</body>
+</html>
